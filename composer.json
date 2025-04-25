@@ -1,5 +1,5 @@
 {
-    "name": "MarceloEatWorld/plunk-laravel",
+    "name": "marceloeatworld/plunk-laravel",
     "description": "Laravel mail transport for Plunk API",
     "keywords": ["laravel", "plunk", "mail", "email", "transport"],
     "license": "MIT",
