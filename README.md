@@ -16,6 +16,14 @@ Publish the config file:
 php artisan vendor:publish --tag="plunk-config"
 ```
 
+Add the following to your `config/mail.php` file within the `mailers` array:
+
+```php
+'plunk' => [
+    'transport' => 'plunk',
+],
+```
+
 ## Configuration
 
 Add these variables to your `.env` file:
@@ -30,6 +38,7 @@ For self-hosted Plunk installations, use:
 
 ```env
 PLUNK_API_URL=https://your-domain.com
+PLUNK_API_KEY=your-plunk-api-key
 PLUNK_API_ENDPOINT=/api/v1/send
 ```
 
