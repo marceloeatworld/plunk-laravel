@@ -7,103 +7,121 @@ use Illuminate\Support\Facades\Log;
 
 class PlunkService
 {
-    /**
-     * @var string
-     */
-    protected $apiKey;
+    public function __construct(
+        protected readonly string $apiKey,
+        protected readonly string $baseUrl,
+        protected readonly string $endpoint = '/v1/send',
+    ) {}
 
     /**
-     * @var string
-     */
-    protected $baseUrl;
-
-    /**
-     * @var string
-     */
-    protected $endpoint;
-
-    /**
-     * Create a new Plunk Service instance.
+     * Send a transactional email.
      *
-     * @param string $apiKey
-     * @param string $baseUrl
-     * @param string $endpoint
-     * @return void
+     * @param string|array<string|array{name: string, email: string}> $to
      */
-    public function __construct(string $apiKey, string $baseUrl, string $endpoint = '/api/v1/send')
+    public function sendEmail(string|array $to, string $subject, string $body, array $options = []): array
     {
-        $this->apiKey = $apiKey;
-        $this->baseUrl = $baseUrl;
-        $this->endpoint = $endpoint;
+        $payload = [
+            'to' => $to,
+            'subject' => $subject,
+            'body' => $body,
+        ];
+
+        foreach (['from', 'name', 'reply', 'subscribed', 'headers', 'attachments'] as $field) {
+            if (isset($options[$field])) {
+                $payload[$field] = $options[$field];
+            }
+        }
+
+        return $this->request('POST', $this->endpoint, $payload);
     }
 
     /**
-     * Send an email via Plunk API.
+     * Send an email using a Plunk template.
      *
-     * @param string|array $to
-     * @param string $subject
-     * @param string $body
-     * @param array $options
-     * @return array
+     * @param string|array<string|array{name: string, email: string}> $to
+     * @param array<string, mixed> $data Template variables
      */
-    public function sendEmail($to, string $subject, string $body, array $options = []): array
+    public function sendTemplate(string|array $to, string $templateId, array $data = [], array $options = []): array
+    {
+        $payload = [
+            'to' => $to,
+            'template' => $templateId,
+        ];
+
+        if (!empty($data)) {
+            $payload['data'] = $data;
+        }
+
+        foreach (['from', 'name', 'reply', 'subscribed', 'headers'] as $field) {
+            if (isset($options[$field])) {
+                $payload[$field] = $options[$field];
+            }
+        }
+
+        return $this->request('POST', $this->endpoint, $payload);
+    }
+
+    /**
+     * Track an event for a contact (auto-creates contact if needed).
+     *
+     * @param array<string, mixed> $data Event data / contact metadata
+     */
+    public function trackEvent(string $email, string $event, array $data = [], bool $subscribed = true): array
+    {
+        $payload = [
+            'email' => $email,
+            'event' => $event,
+            'subscribed' => $subscribed,
+        ];
+
+        if (!empty($data)) {
+            $payload['data'] = $data;
+        }
+
+        return $this->request('POST', '/v1/track', $payload);
+    }
+
+    /**
+     * Verify an email address.
+     */
+    public function verifyEmail(string $email): array
+    {
+        return $this->request('POST', '/v1/verify', ['email' => $email]);
+    }
+
+    /**
+     * Make an authenticated request to the Plunk API.
+     */
+    protected function request(string $method, string $endpoint, array $data = []): array
     {
         try {
-            $payload = [
-                'to' => $to,
-                'subject' => $subject,
-                'body' => $body,
-            ];
-            
-            if (isset($options['from'])) {
-                $payload['from'] = $options['from'];
-            }
-            
-            if (isset($options['name'])) {
-                $payload['name'] = $options['name'];
-            }
-            
-            if (isset($options['reply'])) {
-                $payload['reply'] = $options['reply'];
-            }
-            
-            if (isset($options['subscribed'])) {
-                $payload['subscribed'] = $options['subscribed'];
-            }
-            
-            if (isset($options['headers']) && is_array($options['headers'])) {
-                $payload['headers'] = $options['headers'];
-            }
-            
-            $response = Http::withHeaders([
-                'Authorization' => 'Bearer ' . $this->apiKey,
-                'Content-Type' => 'application/json',
-            ])->post($this->baseUrl . $this->endpoint, $payload);
-            
+            $response = Http::withToken($this->apiKey)
+                ->$method($this->baseUrl . $endpoint, $data);
+
             if ($response->successful()) {
-                return $response->json();
-            } else {
-                Log::error('Plunk API Error', [
-                    'status' => $response->status(),
-                    'response' => $response->body(),
-                    'payload' => $payload,
-                ]);
-                
-                return [
-                    'success' => false,
-                    'error' => 'Plunk API Error: ' . $response->status(),
-                    'message' => $response->body(),
-                ];
+                return $response->json() ?? ['success' => true];
             }
-        } catch (\Exception $e) {
-            Log::error('Exception when sending email via Plunk', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+
+            Log::error('Plunk API error', [
+                'status' => $response->status(),
+                'response' => $response->body(),
+                'endpoint' => $endpoint,
             ]);
-            
+
             return [
                 'success' => false,
-                'error' => 'Exception: ' . $e->getMessage(),
+                'error' => 'Plunk API error: HTTP ' . $response->status(),
+                'message' => $response->body(),
+            ];
+        } catch (\Exception $e) {
+            Log::error('Plunk API exception', [
+                'message' => $e->getMessage(),
+                'endpoint' => $endpoint,
+            ]);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
             ];
         }
     }

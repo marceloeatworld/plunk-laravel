@@ -10,89 +10,124 @@ use Symfony\Component\Mime\MessageConverter;
 
 class PlunkTransport extends AbstractTransport
 {
-    /**
-     * @var PlunkService
-     */
-    protected $plunkService;
-
-    /**
-     * Create a new Plunk Transport instance.
-     *
-     * @param PlunkService $plunkService
-     * @return void
-     */
-    public function __construct(PlunkService $plunkService)
-    {
+    public function __construct(
+        protected readonly PlunkService $plunkService,
+    ) {
         parent::__construct();
-        $this->plunkService = $plunkService;
     }
 
-    /**
-     * {@inheritdoc}
-     */
     protected function doSend(SentMessage $message): void
     {
         $email = MessageConverter::toEmail($message->getOriginalMessage());
-        
-        $to = array_map(function (Address $address) {
-            return $address->getAddress();
-        }, $email->getTo());
-        
-        $to = count($to) === 1 ? $to[0] : $to;
-        
-        $fromAddresses = $email->getFrom();
-        $from = null;
-        $name = null;
-        
-        if (count($fromAddresses) > 0) {
-            $fromAddress = $fromAddresses[0];
-            $from = $fromAddress->getAddress();
-            $name = $fromAddress->getName();
+
+        $recipients = $this->collectRecipients($email);
+        $options = $this->buildOptions($email);
+
+        $body = $email->getHtmlBody() ?? $email->getTextBody() ?? '';
+        if (is_resource($body)) {
+            $body = stream_get_contents($body) ?: '';
         }
-        
-        $replyToAddresses = $email->getReplyTo();
-        $replyTo = null;
-        
-        if (count($replyToAddresses) > 0) {
-            $replyToAddress = $replyToAddresses[0];
-            $replyTo = $replyToAddress->getAddress();
-        }
-        
-        $headers = [];
-        foreach ($email->getHeaders()->all() as $header) {
-            if (!in_array(strtolower($header->getName()), ['from', 'to', 'subject', 'cc', 'bcc'])) {
-                $headers[$header->getName()] = $header->getBodyAsString();
-            }
-        }
-        
-        $options = [];
-        if ($from) $options['from'] = $from;
-        if ($name) $options['name'] = $name;
-        if ($replyTo) $options['reply'] = $replyTo;
-        if (!empty($headers)) $options['headers'] = $headers;
-        
-        $body = $email->getHtmlBody();
-        if (empty($body)) {
-            $body = $email->getTextBody();
-        }
-        
+
         $result = $this->plunkService->sendEmail(
-            $to,
-            $email->getSubject(),
-            $body,
-            $options
+            $recipients,
+            $email->getSubject() ?? '',
+            (string) $body,
+            $options,
         );
-        
+
         if (isset($result['success']) && $result['success'] === false) {
-            throw new \RuntimeException('Error sending via Plunk: ' . ($result['error'] ?? 'Unknown error'));
+            throw new \RuntimeException(
+                'Plunk: ' . ($result['error'] ?? 'Unknown error')
+            );
         }
     }
 
     /**
-     * Get the string representation of the transport.
-     *
-     * @return string
+     * Collect all recipients (To + CC + BCC) since Plunk only has a "to" field.
      */
+    protected function collectRecipients($email): string|array
+    {
+        $recipients = [];
+
+        foreach ($email->getTo() as $address) {
+            $recipients[] = $this->formatAddress($address);
+        }
+
+        foreach ($email->getCc() as $address) {
+            $recipients[] = $this->formatAddress($address);
+        }
+
+        foreach ($email->getBcc() as $address) {
+            $recipients[] = $this->formatAddress($address);
+        }
+
+        return count($recipients) === 1 ? $recipients[0] : $recipients;
+    }
+
+    /**
+     * Format an address as string or {name, email} object for the Plunk API.
+     */
+    protected function formatAddress(Address $address): string|array
+    {
+        if ($address->getName() !== '') {
+            return [
+                'name' => $address->getName(),
+                'email' => $address->getAddress(),
+            ];
+        }
+
+        return $address->getAddress();
+    }
+
+    protected function buildOptions($email): array
+    {
+        $options = [];
+
+        // From
+        $fromAddresses = $email->getFrom();
+        if (!empty($fromAddresses)) {
+            $from = $fromAddresses[0];
+            $options['from'] = $from->getAddress();
+            if ($from->getName() !== '') {
+                $options['name'] = $from->getName();
+            }
+        }
+
+        // Reply-To
+        $replyTo = $email->getReplyTo();
+        if (!empty($replyTo)) {
+            $options['reply'] = $replyTo[0]->getAddress();
+        }
+
+        // Custom headers (exclude standard ones handled by Plunk)
+        $excludedHeaders = [
+            'from', 'to', 'cc', 'bcc', 'subject', 'reply-to',
+            'content-type', 'content-transfer-encoding', 'mime-version',
+            'message-id', 'date',
+        ];
+        $headers = [];
+        foreach ($email->getHeaders()->all() as $header) {
+            if (!in_array(strtolower($header->getName()), $excludedHeaders)) {
+                $headers[$header->getName()] = $header->getBodyAsString();
+            }
+        }
+        if (!empty($headers)) {
+            $options['headers'] = $headers;
+        }
+
+        // Attachments (base64 encoded for Plunk API)
+        $attachments = $email->getAttachments();
+        if (!empty($attachments)) {
+            $options['attachments'] = array_map(fn ($part) => [
+                'filename' => $part->getFilename() ?? 'attachment',
+                'content' => base64_encode($part->getBody()),
+                'contentType' => $part->getMediaType() . '/' . $part->getMediaSubtype(),
+            ], $attachments);
+        }
+
+        return $options;
+    }
+
     public function __toString(): string
     {
         return 'plunk';
