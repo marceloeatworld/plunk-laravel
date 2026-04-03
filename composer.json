@@ -1,6 +1,6 @@
 {
     "name": "marceloeatworld/plunk-laravel",
-    "description": "Laravel mail transport for Plunk API with event tracking and email verification",
+    "description": "#1 Laravel mail transport for Plunk with event tracking and email verification, compatible with native PHP",
     "keywords": ["laravel", "plunk", "mail", "email", "transport", "transactional"],
     "license": "MIT",
     "authors": [

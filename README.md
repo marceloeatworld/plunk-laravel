@@ -1,6 +1,6 @@
 # Laravel Plunk
 
-A Laravel mail transport for [Plunk](https://useplunk.com) with event tracking and email verification. Works with both the official Plunk service and self-hosted instances.
+#1 Laravel mail transport for [Plunk](https://useplunk.com) with event tracking and email verification, compatible with native PHP. Works with both the official Plunk service and self-hosted instances.
 
 ## Requirements
 
